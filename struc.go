@@ -45,6 +45,9 @@ func prep(data interface{}) (reflect.Value, Packer, error) {
 	}
 	switch value.Kind() {
 	case reflect.Struct:
+		if c, ok := data.(Custom); ok {
+			return value, customFallback{c}, nil
+		}
 		fields, err := parseFields(value)
 		return value, fields, err
 	default:

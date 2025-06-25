@@ -358,3 +358,57 @@ func TestCustomTypes(t *testing.T) {
 		runner(t)
 	}
 }
+
+type testCustomStruct struct {
+	Str string
+	N   int
+}
+
+func (s *testCustomStruct) Pack(p []byte, opt *Options) (int, error) {
+	order := opt.Order
+	if order == nil {
+		order = binary.BigEndian
+	}
+	order.PutUint32(p, uint32(s.N))
+	b := []byte(s.Str)
+	for i := 4; i < len(p); i++ {
+		p[i] = b[i-4]
+	}
+	return 4 + len(b), nil
+}
+func (s *testCustomStruct) Unpack(r io.Reader, length int, opt *Options) error {
+	s.Str = "tester" // fake unpacker -- just testing that we use the custom code here
+	s.N = 6
+	return nil
+}
+func (s *testCustomStruct) Size(opt *Options) int {
+	return 4 + len(s.Str)
+}
+func (s *testCustomStruct) String() string {
+	return s.Str
+}
+
+func TestCustomStruct(t *testing.T) {
+	testB := []byte{0, 0, 0, 6, 116, 101, 115, 116, 101, 114}
+	c := &testCustomStruct{}
+	if err := Unpack(bytes.NewBuffer(testB), c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Str != "tester" {
+		t.Fatalf("expected 'tester' but got %s", c.Str)
+	}
+	if c.N != 6 {
+		t.Fatalf("expected 6 but got %d", c.N)
+	}
+
+	w := bytes.NewBuffer([]byte{})
+	if err := Pack(w, c); err != nil {
+		t.Fatal(err)
+	}
+	ob := w.Bytes()
+	for i, v := range testB {
+		if ob[i] != v {
+			t.Fatalf("at position %d expected %d but got %d", i, v, ob[i])
+		}
+	}
+}
