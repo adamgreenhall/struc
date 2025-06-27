@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Custom Type
@@ -365,11 +368,7 @@ type testCustomStruct struct {
 }
 
 func (s *testCustomStruct) Pack(p []byte, opt *Options) (int, error) {
-	order := opt.Order
-	if order == nil {
-		order = binary.BigEndian
-	}
-	order.PutUint32(p, uint32(s.N))
+	binary.BigEndian.PutUint32(p, uint32(s.N))
 	b := []byte(s.Str)
 	for i := 4; i < len(p); i++ {
 		p[i] = b[i-4]
@@ -391,24 +390,58 @@ func (s *testCustomStruct) String() string {
 func TestCustomStruct(t *testing.T) {
 	testB := []byte{0, 0, 0, 6, 116, 101, 115, 116, 101, 114}
 	c := &testCustomStruct{}
-	if err := Unpack(bytes.NewBuffer(testB), c); err != nil {
-		t.Fatal(err)
-	}
-	if c.Str != "tester" {
-		t.Fatalf("expected 'tester' but got %s", c.Str)
-	}
-	if c.N != 6 {
-		t.Fatalf("expected 6 but got %d", c.N)
-	}
+	require.NoError(t, Unpack(bytes.NewBuffer(testB), c))
+	assert.Equal(t, "tester", c.Str)
+	assert.Equal(t, 6, c.N)
 
 	w := bytes.NewBuffer([]byte{})
-	if err := Pack(w, c); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Pack(w, c))
 	ob := w.Bytes()
-	for i, v := range testB {
-		if ob[i] != v {
-			t.Fatalf("at position %d expected %d but got %d", i, v, ob[i])
-		}
+	assert.EqualValues(t, testB, ob)
+}
+
+type testDataLenStruct struct {
+	DataLen int `struc:"uint32,sizeof=Data"`
+	Data    *testDataStruct
+}
+type testDataStruct struct {
+	A int `struc:"uint32,sizeof=B"`
+	B string
+}
+
+func TestSizeofStruc(t *testing.T) {
+	s := testDataLenStruct{Data: &testDataStruct{B: "testString"}}
+	expectedB := []byte{
+		0, 0, 0, 14, // len(data)=14
+		0, 0, 0, 10, // len(B)=10
+		116, 101, 115, 116, 83, 116, 114, 105, 110, 103, // testString
 	}
+	w := bytes.NewBuffer([]byte{})
+	require.NoError(t, Pack(w, &s))
+	assert.EqualValues(t, expectedB, w.Bytes())
+
+	us := testDataLenStruct{}
+	require.NoError(t, Unpack(bytes.NewBuffer(expectedB), &us))
+	assert.Equal(t, us.DataLen, 14)
+	assert.Equal(t, us.Data.A, 10)
+	assert.Equal(t, "testString", us.Data.B)
+}
+
+func TestSizeofStrucEmpty(t *testing.T) {
+	s := testDataLenStruct{}
+	expectedB := []byte{
+		0, 0, 0, 0, // len(data)=0
+	}
+	n, err := Sizeof(&s)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+
+	us := testDataLenStruct{}
+	require.NoError(t, Unpack(bytes.NewBuffer(expectedB), &us))
+	assert.Equal(t, us.DataLen, 0)
+	assert.Nil(t, us.Data)
+
+	w := bytes.NewBuffer([]byte{})
+	require.NoError(t, Pack(w, &s))
+	assert.EqualValues(t, expectedB, w.Bytes())
 }

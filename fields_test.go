@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 var refVal = reflect.ValueOf(reference)
@@ -50,12 +52,7 @@ type sizefromStructBad struct {
 func TestFieldsSizefromBad(t *testing.T) {
 	var test = &sizefromStructBad{Var1: []byte{1, 2, 3}}
 	var buf bytes.Buffer
-	defer func() {
-		if err := recover(); err == nil {
-			t.Fatal("failed to panic on bad sizeof type")
-		}
-	}()
-	Pack(&buf, &test)
+	require.Error(t, Pack(&buf, &test))
 }
 
 type StructWithinArray struct {

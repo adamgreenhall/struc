@@ -29,8 +29,13 @@ func (f Fields) String() string {
 }
 
 func (f Fields) Sizeof(val reflect.Value, options *Options) int {
-	for val.Kind() == reflect.Ptr {
+	k := val.Kind()
+	for k == reflect.Ptr {
 		val = val.Elem()
+		k = val.Kind()
+		if k == reflect.Invalid { // nil
+			return 0
+		}
 	}
 	size := 0
 	for i, field := range f {
@@ -64,6 +69,9 @@ func (f Fields) Pack(buf []byte, val reflect.Value, options *Options) (int, erro
 	for val.Kind() == reflect.Ptr {
 		val = val.Elem()
 	}
+	if !val.IsValid() { // nil pointer
+		return 0, nil
+	}
 	pos := 0
 	for i, field := range f {
 		if field == nil {
@@ -78,19 +86,28 @@ func (f Fields) Pack(buf []byte, val reflect.Value, options *Options) (int, erro
 			length = v.Len()
 		}
 		if field.Sizeof != nil {
-			length := val.FieldByIndex(field.Sizeof).Len()
+			var size int
+			fieldToSize := val.FieldByIndex(field.Sizeof)
+			switch fieldToSize.Kind() {
+			case reflect.Struct, reflect.Ptr:
+				if len(field.Sizeof) != 1 {
+					return 0, fmt.Errorf("expecting sizeof=1, got %d", len(field.Sizeof))
+				}
+				size = f[field.Sizeof[0]].Size(fieldToSize, options)
+			default:
+				size = fieldToSize.Len()
+			}
+			v = reflect.New(v.Type()).Elem()
 			switch field.kind {
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 				// allocating a new int here has fewer side effects (doesn't update the original struct)
 				// but it's a wasteful allocation
 				// the old method might work if we just cast the temporary int/uint to the target type
-				v = reflect.New(v.Type()).Elem()
-				v.SetInt(int64(length))
+				v.SetInt(int64(size))
 			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				v = reflect.New(v.Type()).Elem()
-				v.SetUint(uint64(length))
+				v.SetUint(uint64(size))
 			default:
-				panic(fmt.Sprintf("sizeof field is not int or uint type: %s, %s", field.Name, v.Type()))
+				return 0, fmt.Errorf("sizeof field is not int or uint type: %s, %s", field.Name, v.Type())
 			}
 		}
 		if n, err := field.Pack(buf[pos:], v, length, options); err != nil {
@@ -118,7 +135,9 @@ func (f Fields) Unpack(r io.Reader, val reflect.Value, options *Options) error {
 			length = f.sizefrom(val, field.Sizefrom)
 		}
 		if v.Kind() == reflect.Ptr && !v.Elem().IsValid() {
-			v.Set(reflect.New(v.Type().Elem()))
+			if field.Sizefrom == nil || length > 0 { // dont create struct if sizefrom with length=0
+				v.Set(reflect.New(v.Type().Elem()))
+			}
 		}
 		if field.Type == Struct {
 			if field.Slice {
@@ -140,6 +159,9 @@ func (f Fields) Unpack(r io.Reader, val reflect.Value, options *Options) error {
 					v.Set(vals)
 				}
 			} else {
+				if length == 0 {
+					continue // dont parse
+				}
 				// TODO: DRY (we repeat the inner loop above)
 				fields, err := parseFields(v)
 				if err != nil {
