@@ -176,7 +176,7 @@ func (f Fields) Unpack(r io.Reader, val reflect.Value, options *Options) error {
 			typ := field.Type.Resolve(options)
 			if typ == CustomType {
 				if err := v.Addr().Interface().(Custom).Unpack(r, length, options); err != nil {
-					return err
+					return fmt.Errorf("failed to unpack custom field %s. %s", field.Name, err)
 				}
 			} else {
 				size := length * field.Type.Resolve(options).Size()
@@ -186,7 +186,7 @@ func (f Fields) Unpack(r io.Reader, val reflect.Value, options *Options) error {
 					buf = make([]byte, size)
 				}
 				if _, err := io.ReadFull(r, buf); err != nil {
-					return err
+					return fmt.Errorf("failed to unpack field %s with size %d. %s", field.Name, size, err)
 				}
 				err := field.Unpack(buf[:size], v, length, options)
 				if err != nil {
